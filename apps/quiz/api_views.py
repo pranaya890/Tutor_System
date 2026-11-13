@@ -8,9 +8,11 @@ from django.utils import timezone
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
-
+from apps.documents.models import Document
+from apps.recommendations.services import (get_topic_performance,get_document_topics,)
 from .models import Quiz,QuizAttempt, StudentAnswer
 from .services import generate_quiz, evaluate_short_answer
+from apps.recommendations.models import PerformanceReset
 
 
 logger = logging.getLogger(__name__)
@@ -38,6 +40,145 @@ class ReadyDocumentsView(APIView):
         ]
 
         return Response(data)
+
+
+
+
+class TopicDifficultyRecommendationView(APIView):
+    """
+    Recommend quiz difficulty based on completed attempts
+    from a selected PDF and optionally a specific topic.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+
+        document_id = request.query_params.get("document_id")
+        topic = request.query_params.get("topic", "all").strip()
+
+        if not document_id:
+            return Response(
+                {"error": "Document ID is required."},
+                status=400,
+            )
+
+        try:
+            document_id = int(document_id)
+        except (TypeError, ValueError):
+            return Response(
+                {"error": "Invalid document ID."},
+                status=400,
+            )
+
+        if not topic:
+            topic = "all"
+
+        document = get_object_or_404(
+            Document,
+            id=document_id,
+            owner=request.user,
+            status="ready",
+        )
+
+        topics = get_document_topics(
+            student=request.user,
+            document_id=document.id,
+        )
+
+        performance = get_topic_performance(
+            student=request.user,
+            document_id=document.id,
+            topic=topic,
+        )
+
+        performance["available_topics"] = topics
+
+        return Response(performance)
+
+
+class PerformanceResetView(APIView):
+    """
+    Reset adaptive performance for one topic or all topics
+    within a selected PDF. Previous quiz attempts are preserved.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        document_id = request.data.get("document_id")
+        topic = str(request.data.get("topic", "all")).strip()
+
+        if not document_id:
+            return Response(
+                {"error": "Document ID is required."},
+                status=400,
+            )
+
+        try:
+            document_id = int(document_id)
+        except (TypeError, ValueError):
+            return Response(
+                {"error": "Invalid document ID."},
+                status=400,
+            )
+
+        if not topic:
+            topic = "all"
+
+        document = get_object_or_404(
+            Document,
+            id=document_id,
+            owner=request.user,
+            status="ready",
+        )
+
+        if topic.casefold() == "all":
+            topic = "all"
+        else:
+            available_topics = get_document_topics(
+                student=request.user,
+                document_id=document.id,
+            )
+
+            matching_topic = next(
+                (
+                    existing_topic
+                    for existing_topic in available_topics
+                    if existing_topic.casefold() == topic.casefold()
+                ),
+                None,
+            )
+
+            if matching_topic is None:
+                return Response(
+                    {"error": "Topic not found in this document."},
+                    status=400,
+                )
+
+            topic = matching_topic
+
+        reset = PerformanceReset.objects.create(
+            student=request.user,
+            document=document,
+            topic=topic,
+        )
+
+        return Response(
+            {
+                "message": (
+                    "Performance reset successfully. "
+                    "Previous quiz attempts have been preserved."
+                ),
+                "document_id": document.id,
+                "topic": reset.topic,
+                "reset_at": reset.reset_at,
+            },
+            status=201,
+        )
+
+
+
 
 
 class GenerateQuizView(APIView):

@@ -8,6 +8,8 @@ from .api_views import (
     StartQuizAttemptView,
     SubmitQuizAttemptView,
     QuizResultView,
+    TopicDifficultyRecommendationView,
+    PerformanceResetView,
 )
 
 urlpatterns = [
@@ -44,5 +46,15 @@ urlpatterns = [
     "attempts/<int:attempt_id>/result/",
     QuizResultView.as_view(),
     name="quiz-result",
+    ),
+    path(
+    "recommend-difficulty/",
+    TopicDifficultyRecommendationView.as_view(),
+    name="recommend-quiz-difficulty",
+    ),
+    path(
+    "reset-performance/",
+    PerformanceResetView.as_view(),
+    name="reset-performance",
     ),
 ]
