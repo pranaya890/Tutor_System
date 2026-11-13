@@ -51,14 +51,11 @@ bcrypt==5.0.0
 beautifulsoup4==4.15.0
 bidict==0.23.1
 billiard==4.2.4
-binwalk==2.4.3
 bitstruct==8.22.1
 bleach==6.3.0
 blinker==1.9.0
 bloodhound==1.9.0
 bottle==0.13.4
-Bottleneck==1.4.2
-Brlapi==0.8.8
 Brotli==1.2.0
 browser-cookie3==0.20.1
 CacheControl==0.14.4
@@ -154,7 +151,6 @@ fqdn==1.5.1
 frozenlist==1.8.0
 furo==2025.12.19
 fuzzywuzzy==0.18.0
-GDAL @ file:///build/reproducible-path/gdal-3.13.2%2Bdfsg/build-py3.14/swig/python
 gevent==25.9.1
 gevent-websocket==0.10.1
 ghp-import==2.1.0

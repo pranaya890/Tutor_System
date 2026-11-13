@@ -2,8 +2,10 @@ from django.shortcuts import render, redirect, get_object_or_404
 from django.http import JsonResponse
 from django.contrib.auth.decorators import login_required
 from django.views import View
+from django.db.models import Sum, Count
 from django.utils.decorators import method_decorator
-
+from apps.quiz.models import Quiz, QuizAttempt,StudentAnswer
+from apps.recommendations.services import generate_personalized_recommendations
 from .models import TutorSession, ChatMessage
 from apps.documents.models import Document
 from apps.documents.rag import generate_rag_answer
@@ -12,7 +14,7 @@ from apps.documents.rag import generate_rag_answer
 @method_decorator(login_required, name="dispatch")
 class DashboardView(View):
     def get(self, request):
-        # Fetch live database counts for the student
+
         total_docs = Document.objects.filter(
             owner=request.user
         ).count()
@@ -21,12 +23,19 @@ class DashboardView(View):
             user=request.user
         ).count()
 
-        total_quizzes = 0
+        total_quizzes = Quiz.objects.filter(
+            created_by=request.user
+        ).count()
+
+        recommendations = generate_personalized_recommendations(
+            request.user
+        )
 
         context = {
             "total_docs": total_docs,
             "total_quizzes": total_quizzes,
             "chat_sessions": chat_sessions,
+            "recommendations": recommendations,
         }
 
         return render(
@@ -259,12 +268,212 @@ class ClearSessionView(View):
         )
 
 
+
 @method_decorator(login_required, name="dispatch")
 class QuizzesView(View):
 
     def get(self, request):
 
+        # Only show ready documents belonging to this student.
+        ready_documents = Document.objects.filter(
+            owner=request.user,
+            status="ready",
+        ).order_by("-uploaded_at")
+
+        # Only show quizzes created by this student.
+        quizzes = Quiz.objects.filter(
+            created_by=request.user,
+            is_active=True,
+        ).select_related(
+            "document"
+        ).prefetch_related(
+            "questions"
+        ).order_by("-created_at")
+
+        context = {
+            "ready_documents": ready_documents,
+            "quizzes": quizzes,
+            "total_quizzes": quizzes.count(),
+        }
+
         return render(
             request,
-            "tutor/quizzes.html"
+            "tutor/quizzes.html",
+            context,
+        )
+
+@method_decorator(login_required, name="dispatch")
+class QuizTakeView(View):
+
+    def get(self, request, quiz_id):
+        quiz = get_object_or_404(
+            Quiz,
+            id=quiz_id,
+            created_by=request.user,
+            is_active=True,
+        )
+
+        return render(
+            request,
+            "tutor/quiz_take.html",
+            {"quiz": quiz},
+        )
+
+
+@method_decorator(login_required, name="dispatch")
+class QuizResultPageView(View):
+
+    def get(self, request, attempt_id):
+        attempt = get_object_or_404(
+            QuizAttempt.objects.select_related("quiz"),
+            id=attempt_id,
+            student=request.user,
+        )
+
+        return render(
+            request,
+            "tutor/quiz_result.html",
+            {"attempt": attempt},
+        )
+
+
+@method_decorator(login_required, name="dispatch")
+class QuizHistoryView(View):
+
+    def get(self, request):
+
+        # Fetch only this student's quiz attempts.
+        attempts = QuizAttempt.objects.filter(
+            student=request.user
+        ).select_related(
+            "quiz",
+            "quiz__document"
+        ).order_by("-started_at")
+
+        # Separate completed and unfinished attempts.
+        completed_attempts = attempts.filter(
+            status="completed"
+        )
+
+        in_progress_attempts = attempts.filter(
+            status="in_progress"
+        )
+
+        # Calculate completed quiz statistics.
+        total_completed = completed_attempts.count()
+
+        total_attempts = attempts.count()
+
+        total_score = sum(
+            attempt.score or 0
+            for attempt in completed_attempts
+        )
+
+        total_marks = sum(
+            attempt.total_marks or 0
+            for attempt in completed_attempts
+        )
+
+        average_percentage = (
+            (total_score / total_marks) * 100
+            if total_marks > 0
+            else 0
+        )
+
+        context = {
+            "attempts": attempts,
+            "completed_attempts": completed_attempts,
+            "in_progress_attempts": in_progress_attempts,
+            "total_attempts": total_attempts,
+            "total_completed": total_completed,
+            "total_in_progress": in_progress_attempts.count(),
+            "average_percentage": round(average_percentage, 2),
+        }
+
+        return render(
+            request,
+            "tutor/quiz_history.html",
+            context
+        )
+
+
+
+@method_decorator(login_required, name="dispatch")
+class PerformanceAnalysisView(View):
+
+    def get(self, request):
+
+        # Only analyze completed attempts belonging to this student.
+        completed_attempts = QuizAttempt.objects.filter(
+            student=request.user,
+            status="completed",
+        )
+
+        # Group attempts by quiz topic.
+        topic_stats = completed_attempts.values(
+            "quiz__topic"
+        ).annotate(
+            attempt_count=Count("id"),
+            total_score=Sum("score"),
+            total_marks=Sum("total_marks"),
+        ).order_by("quiz__topic")
+
+        # Calculate topic percentages and performance categories.
+        topics = []
+
+        for item in topic_stats:
+
+            score = item["total_score"] or 0
+            marks = item["total_marks"] or 0
+
+            percentage = (
+                (score / marks) * 100
+                if marks > 0
+                else 0
+            )
+
+            if percentage >= 70:
+                category = "Strong"
+            elif percentage < 50:
+                category = "Needs Practice"
+            else:
+                category = "Developing"
+
+            topics.append({
+                "topic": item["quiz__topic"],
+                "attempt_count": item["attempt_count"],
+                "total_score": score,
+                "total_marks": marks,
+                "percentage": round(percentage, 2),
+                "category": category,
+            })
+
+        # Overall performance.
+        total_score = completed_attempts.aggregate(
+            total=Sum("score")
+        )["total"] or 0
+
+        total_marks = completed_attempts.aggregate(
+            total=Sum("total_marks")
+        )["total"] or 0
+
+        overall_percentage = (
+            (total_score / total_marks) * 100
+            if total_marks > 0
+            else 0
+        )
+
+        context = {
+            "topics": topics,
+            "total_completed": completed_attempts.count(),
+            "total_topics": len(topics),
+            "overall_percentage": round(overall_percentage, 2),
+            "total_score": total_score,
+            "total_marks": total_marks,
+        }
+
+        return render(
+            request,
+            "tutor/performance_analysis.html",
+            context,
         )

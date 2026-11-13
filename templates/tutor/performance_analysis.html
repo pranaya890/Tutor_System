@@ -1,0 +1,179 @@
+
+{% extends "base.html" %}
+
+{% block content %}
+
+<div class="container mt-4">
+
+    <!-- Page Header -->
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+            <h2>Learning Performance Analysis</h2>
+            <p class="text-muted">
+                Understand your performance across different learning topics.
+            </p>
+        </div>
+
+        <a href="{% url 'quizzes' %}" class="btn btn-outline-primary">
+            Back to Quizzes
+        </a>
+    </div>
+
+    <!-- Overall Statistics -->
+    <div class="row mb-4">
+
+        <div class="col-md-4 mb-3">
+            <div class="card shadow-sm p-3 h-100">
+                <h6 class="text-muted">Completed Quizzes</h6>
+                <h3>{{ total_completed }}</h3>
+            </div>
+        </div>
+
+        <div class="col-md-4 mb-3">
+            <div class="card shadow-sm p-3 h-100">
+                <h6 class="text-muted">Topics Attempted</h6>
+                <h3>{{ total_topics }}</h3>
+            </div>
+        </div>
+
+        <div class="col-md-4 mb-3">
+            <div class="card shadow-sm p-3 h-100">
+                <h6 class="text-muted">Overall Performance</h6>
+                <h3>{{ overall_percentage }}%</h3>
+                <small class="text-muted">
+                    {{ total_score }} / {{ total_marks }} marks
+                </small>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- Topic Performance -->
+    <div class="card shadow-sm">
+
+        <div class="card-header">
+            <h5 class="mb-0">Topic-wise Performance</h5>
+        </div>
+
+        <div class="card-body">
+
+            {% if topics %}
+
+                {% for item in topics %}
+
+                    <div class="mb-4">
+
+                        <div class="d-flex justify-content-between align-items-center mb-2">
+
+                            <div>
+                                <h6 class="mb-1">{{ item.topic }}</h6>
+                                <small class="text-muted">
+                                    {{ item.attempt_count }} completed attempt(s)
+                                    · {{ item.total_score }} / {{ item.total_marks }} marks
+                                </small>
+                            </div>
+
+                            <div class="text-end">
+
+                                <strong>{{ item.percentage }}%</strong>
+
+                                {% if item.category == "Strong" %}
+                                    <span class="badge bg-success">
+                                        Strong
+                                    </span>
+
+                                {% elif item.category == "Needs Practice" %}
+                                    <span class="badge bg-warning text-dark">
+                                        Needs Practice
+                                    </span>
+
+                                {% else %}
+                                    <span class="badge bg-info text-dark">
+                                        Developing
+                                    </span>
+                                {% endif %}
+
+                            </div>
+
+                        </div>
+
+                        <div class="progress" style="height: 10px;">
+
+                            <div
+                                class="progress-bar
+                                {% if item.category == 'Strong' %}
+                                    bg-success
+                                {% elif item.category == 'Needs Practice' %}
+                                    bg-warning
+                                {% else %}
+                                    bg-info
+                                {% endif %}"
+                                role="progressbar"
+                                style="width: {{ item.percentage }}%;"
+                                aria-valuenow="{{ item.percentage }}"
+                                aria-valuemin="0"
+                                aria-valuemax="100">
+                            </div>
+
+                        </div>
+
+                    </div>
+
+                    {% if not forloop.last %}
+                        <hr>
+                    {% endif %}
+
+                {% endfor %}
+
+            {% else %}
+
+                <div class="text-center py-5">
+
+                    <h5>No Performance Data Available</h5>
+
+                    <p class="text-muted">
+                        Complete at least one quiz to see your topic-wise
+                        learning performance.
+                    </p>
+
+                    <a href="{% url 'quizzes' %}" class="btn btn-primary">
+                        Take a Quiz
+                    </a>
+
+                </div>
+
+            {% endif %}
+
+        </div>
+
+    </div>
+
+    <!-- Performance Guide -->
+    <div class="card shadow-sm mt-4">
+
+        <div class="card-body">
+
+            <h5>Performance Guide</h5>
+
+            <p>
+                <span class="badge bg-success">Strong</span>
+                70% or above
+            </p>
+
+            <p>
+                <span class="badge bg-info text-dark">Developing</span>
+                50% to below 70%
+            </p>
+
+            <p class="mb-0">
+                <span class="badge bg-warning text-dark">Needs Practice</span>
+                Below 50%
+            </p>
+
+        </div>
+
+    </div>
+
+</div>
+
+{% endblock %}
