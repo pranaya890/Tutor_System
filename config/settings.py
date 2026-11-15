@@ -38,6 +38,8 @@ INSTALLED_APPS = [
     'apps.accounts',
     'apps.tutor',
     "rest_framework",
+    "apps.quiz",
+    'apps.recommendations',
     'apps.documents',
 ]
 

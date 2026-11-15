@@ -11,6 +11,7 @@ urlpatterns = [
     path('documents/', include('apps.documents.urls', namespace='documents')),
     path('api/tutor/', include('apps.documents.api_urls')),
     path('', lambda request: redirect('dashboard')),
+    path('api/quizzes/', include('apps.quiz.api_urls')),
 ]
 
 # Serve media files in development

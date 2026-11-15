@@ -1,0 +1,201 @@
+
+{% extends "base.html" %}
+
+{% block content %}
+
+<div class="max-w-4xl mx-auto px-4 py-8">
+
+    <a href="{% url 'quizzes' %}"
+       class="text-indigo-600 hover:underline text-sm">
+        ← Back to Quizzes
+    </a>
+
+    <h1 class="text-3xl font-bold text-gray-800 mt-5 mb-2">
+        Quiz Results
+    </h1>
+
+    <p class="text-gray-500 mb-8">
+        {{ attempt.quiz.title }}
+    </p>
+
+    <div id="loading" class="bg-blue-50 text-blue-700 p-4 rounded-lg">
+        Loading your results...
+    </div>
+
+    <div id="error" class="hidden bg-red-50 text-red-700 p-4 rounded-lg"></div>
+
+    <div id="resultContent" class="hidden">
+
+        <div class="bg-white border rounded-xl shadow-sm p-6 mb-6 text-center">
+
+            <p class="text-gray-500">Your Score</p>
+
+            <h2 id="score" class="text-4xl font-bold text-indigo-600 my-3"></h2>
+
+            <p id="percentage" class="text-gray-600"></p>
+
+            <div class="w-full bg-gray-200 rounded-full h-3 mt-5">
+                <div id="progressBar"
+                     class="bg-indigo-600 h-3 rounded-full"
+                     style="width: 0%">
+                </div>
+            </div>
+
+        </div>
+
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+
+            <div class="bg-white border rounded-lg p-4 text-center">
+                <p class="text-gray-500 text-sm">Questions</p>
+                <p id="totalQuestions" class="text-2xl font-bold"></p>
+            </div>
+
+            <div class="bg-white border rounded-lg p-4 text-center">
+                <p class="text-gray-500 text-sm">Correct</p>
+                <p id="correct" class="text-2xl font-bold text-green-600"></p>
+            </div>
+
+            <div class="bg-white border rounded-lg p-4 text-center">
+                <p class="text-gray-500 text-sm">Incorrect</p>
+                <p id="incorrect" class="text-2xl font-bold text-red-600"></p>
+            </div>
+
+            <div class="bg-white border rounded-lg p-4 text-center">
+                <p class="text-gray-500 text-sm">Pending Evaluation</p>
+                <p id="pending" class="text-2xl font-bold text-yellow-600"></p>
+            </div>
+
+        </div>
+
+        <h2 class="text-xl font-bold mb-4">Answer Review</h2>
+
+        <div id="answerReview" class="space-y-4"></div>
+
+        <a href="{% url 'quizzes' %}"
+           class="inline-block mt-8 bg-indigo-600 hover:bg-indigo-700
+                  text-white px-6 py-3 rounded-lg font-semibold">
+            Back to Quizzes
+        </a>
+
+    </div>
+
+</div>
+
+<script>
+const resultUrl = "{% url 'quiz-result' attempt.id %}";
+
+function escapeHtml(value) {
+    return String(value ?? "").replace(/[&<>"']/g, char => ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#039;"
+    })[char]);
+}
+
+async function loadResults() {
+    try {
+        const response = await fetch(resultUrl, {
+            credentials: "same-origin"
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+            throw new Error(data.error || "Could not load quiz results.");
+        }
+
+        document.getElementById("loading").classList.add("hidden");
+
+        document.getElementById("resultContent").classList.remove("hidden");
+
+        document.getElementById("score").textContent =
+            `${data.score} / ${data.total_marks}`;
+
+        document.getElementById("percentage").textContent =
+            `${Number(data.percentage).toFixed(1)}%`;
+
+        document.getElementById("progressBar").style.width =
+            `${Math.min(100, Math.max(0, Number(data.percentage)))}%`;
+
+        document.getElementById("totalQuestions").textContent =
+            data.total_questions;
+
+        document.getElementById("correct").textContent =
+            data.correct_answers;
+
+        document.getElementById("incorrect").textContent =
+            data.incorrect_answers;
+
+        document.getElementById("pending").textContent =
+            data.pending_evaluation;
+
+        const review = document.getElementById("answerReview");
+
+        (data.results || []).forEach((item, index) => {
+
+            let status = "Pending Evaluation";
+            let statusClass = "text-yellow-600";
+
+            if (item.is_correct === true) {
+                status = "Correct";
+                statusClass = "text-green-600";
+            } else if (item.is_correct === false) {
+                status = "Incorrect";
+                statusClass = "text-red-600";
+            }
+
+            const answer = typeof item.submitted_answer === "object"
+                ? JSON.stringify(item.submitted_answer)
+                : item.submitted_answer;
+
+            review.innerHTML += `
+                <div class="bg-white border rounded-xl p-5 shadow-sm">
+
+                    <div class="flex justify-between gap-3 mb-3">
+                        <h3 class="font-semibold">
+                            Q${index + 1}. ${escapeHtml(item.question_text)}
+                        </h3>
+
+                        <span class="${statusClass} font-semibold text-sm">
+                            ${status}
+                        </span>
+                    </div>
+
+                    <p class="text-gray-600 text-sm mb-2">
+                        Your Answer:
+                        <span class="font-medium text-gray-800">
+                            ${escapeHtml(answer || "No answer")}
+                        </span>
+                    </p>
+
+                    <p class="text-gray-600 text-sm">
+                        Marks Obtained:
+                        ${escapeHtml(item.marks_obtained ?? 0)}
+                        / ${escapeHtml(item.marks)}
+                    </p>
+
+                    ${item.feedback ? `
+                        <p class="mt-3 text-sm text-gray-500">
+                            Feedback: ${escapeHtml(item.feedback)}
+                        </p>
+                    ` : ""}
+
+                </div>
+            `;
+        });
+
+    } catch (error) {
+        document.getElementById("loading").classList.add("hidden");
+
+        const errorBox = document.getElementById("error");
+        errorBox.textContent = error.message;
+        errorBox.classList.remove("hidden");
+    }
+}
+
+loadResults();
+</script>
+
+{% endblock %}

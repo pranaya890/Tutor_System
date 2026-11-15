@@ -1,0 +1,309 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="max-w-4xl mx-auto px-4 py-8">
+
+    <div class="mb-8">
+        <a href="{% url 'quizzes' %}"
+           class="text-indigo-600 hover:underline text-sm">
+            ← Back to Quizzes
+        </a>
+
+        <h1 class="text-3xl font-bold text-gray-800 mt-4">
+            {{ quiz.title }}
+        </h1>
+
+        <p class="text-gray-600 mt-2">
+            Topic: {{ quiz.topic }}
+        </p>
+
+        <p class="text-sm text-gray-500 mt-1">
+            Difficulty: {{ quiz.difficulty|title }}
+            | {{ quiz.total_questions }} Questions
+        </p>
+    </div>
+
+    <div id="loadingMessage"
+         class="bg-blue-50 text-blue-700 p-4 rounded-lg">
+        Loading your quiz...
+    </div>
+
+    <div id="errorMessage"
+         class="hidden bg-red-50 text-red-700 p-4 rounded-lg mb-4">
+    </div>
+
+    <form id="quizForm" class="hidden space-y-6">
+
+        <div id="questionsContainer" class="space-y-6"></div>
+
+        <button type="submit"
+                id="submitButton"
+                class="bg-indigo-600 hover:bg-indigo-700
+                       text-white font-semibold px-6 py-3
+                       rounded-lg disabled:opacity-50">
+            Submit Quiz
+        </button>
+
+    </form>
+
+</div>
+
+<script>
+const startUrl = "{% url 'start-quiz-attempt' quiz.id %}";
+const submitUrlTemplate = "{% url 'submit-quiz-attempt' 0 %}";
+const resultUrlTemplate = "{% url 'quiz_result_page' 0 %}";
+
+let attemptId = null;
+let questions = [];
+
+function getCsrfToken() {
+    return document.querySelector(
+        '[name=csrfmiddlewaretoken]'
+    )?.value || "";
+}
+
+function showError(message) {
+    const errorBox = document.getElementById("errorMessage");
+    errorBox.textContent = message;
+    errorBox.classList.remove("hidden");
+}
+
+function escapeHtml(value) {
+    return String(value ?? "").replace(/[&<>"']/g, function(char) {
+        return {
+            "&": "&amp;",
+            "<": "&lt;",
+            ">": "&gt;",
+            '"': "&quot;",
+            "'": "&#039;"
+        }[char];
+    });
+}
+
+function normalizeOptions(options) {
+    if (!Array.isArray(options)) {
+        return [];
+    }
+
+    return options.map((option, index) => {
+        if (typeof option === "object" && option !== null) {
+            return {
+                value: option.value ?? option.label ?? String(index),
+                label: option.label ?? option.value ?? String(index)
+            };
+        }
+
+        return {
+            value: String(option),
+            label: String(option)
+        };
+    });
+}
+
+async function startQuiz() {
+    try {
+        const response = await fetch(startUrl, {
+            method: "POST",
+            credentials: "same-origin",
+            headers: {
+                "X-CSRFToken": getCsrfToken()
+            }
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+            throw new Error(data.error || "Could not start the quiz.");
+        }
+
+        attemptId = data.attempt_id;
+        questions = data.questions || [];
+
+        if (!attemptId || questions.length === 0) {
+            throw new Error("The quiz did not return any questions.");
+        }
+
+        renderQuestions();
+
+        document.getElementById("loadingMessage").classList.add("hidden");
+        document.getElementById("quizForm").classList.remove("hidden");
+
+    } catch (error) {
+        document.getElementById("loadingMessage").classList.add("hidden");
+        showError(error.message);
+    }
+}
+
+function renderQuestions() {
+    const container = document.getElementById("questionsContainer");
+
+    container.innerHTML = "";
+
+    questions.forEach((question, index) => {
+        const questionType = question.question_type;
+        let answerHTML = "";
+
+        if (questionType === "mcq" || questionType === "true_false") {
+            const options = normalizeOptions(question.options);
+
+            answerHTML = options.map((option, optionIndex) => `
+                <label class="flex items-center gap-3 p-3 border
+                              rounded-lg cursor-pointer hover:bg-gray-50">
+                    <input
+                        type="radio"
+                        name="question_${question.id}"
+                        value="${escapeHtml(option.value)}"
+                        required
+                        class="text-indigo-600"
+                    >
+                    <span>${escapeHtml(option.label)}</span>
+                </label>
+            `).join("");
+
+        } else if (questionType === "short_answer") {
+            answerHTML = `
+                <textarea
+                    name="question_${question.id}"
+                    rows="4"
+                    required
+                    placeholder="Write your answer here..."
+                    class="w-full border rounded-lg p-3
+                           focus:ring-2 focus:ring-indigo-500"
+                ></textarea>
+            `;
+        }
+
+        container.innerHTML += `
+            <div class="bg-white border rounded-xl p-6 shadow-sm">
+
+                <div class="flex justify-between gap-4 mb-4">
+                    <h3 class="font-semibold text-lg text-gray-800">
+                        Q${index + 1}. ${escapeHtml(question.question_text)}
+                    </h3>
+
+                    <span class="text-sm text-gray-500 whitespace-nowrap">
+                        ${escapeHtml(question.marks)} marks
+                    </span>
+                </div>
+
+                <div class="space-y-3">
+                    ${answerHTML}
+                </div>
+
+            </div>
+        `;
+    });
+}
+
+document.getElementById("quizForm").addEventListener(
+    "submit",
+    async function(event) {
+
+        event.preventDefault();
+
+        if (!attemptId) {
+            showError("Your quiz attempt has not started.");
+            return;
+        }
+
+        const submitButton = document.getElementById("submitButton");
+        submitButton.disabled = true;
+        submitButton.textContent = "Submitting...";
+
+        const answers = [];
+
+        for (const question of questions) {
+            const fieldName = `question_${question.id}`;
+            let answer;
+
+            if (
+                question.question_type === "mcq" ||
+                question.question_type === "true_false"
+            ) {
+                const selected = document.querySelector(
+                    `input[name="${fieldName}"]:checked`
+                );
+
+                if (!selected) {
+                    showError("Please answer all questions before submitting.");
+                    submitButton.disabled = false;
+                    submitButton.textContent = "Submit Quiz";
+                    return;
+                }
+
+                answer = selected.value;
+
+            } else {
+                const textarea = document.querySelector(
+                    `textarea[name="${fieldName}"]`
+                );
+
+                answer = textarea?.value.trim() || "";
+
+                if (!answer) {
+                    showError("Please answer all questions before submitting.");
+                    submitButton.disabled = false;
+                    submitButton.textContent = "Submit Quiz";
+                    return;
+                }
+            }
+
+            answers.push({
+                question_id: question.id,
+                answer: answer
+            });
+        }
+
+        try {
+            const submitUrl = submitUrlTemplate.replace(
+                "/0/",
+                `/${attemptId}/`
+            );
+
+            const response = await fetch(submitUrl, {
+                method: "POST",
+                credentials: "same-origin",
+                headers: {
+                    "Content-Type": "application/json",
+                    "X-CSRFToken": getCsrfToken()
+                },
+                body: JSON.stringify({
+                    answers: answers
+                })
+            });
+
+            const data = await response.json();
+
+            if (!response.ok) {
+                throw new Error(
+                    data.error || "Quiz submission failed."
+                );
+            }
+
+            // A successful HTTP response means submission was accepted.
+            // Navigate to the result page and let it retrieve the latest result.
+            const resultUrl = resultUrlTemplate.replace(
+                "/0/",
+                `/${attemptId}/`
+            );
+
+            window.location.href = resultUrl;
+
+        } catch (error) {
+            showError(error.message);
+
+            submitButton.disabled = false;
+            submitButton.textContent = "Submit Quiz";
+        }
+    }
+);
+
+// Read CSRF token from Django's hidden form field.
+document.addEventListener("DOMContentLoaded", startQuiz);
+</script>
+
+<form class="hidden">
+    {% csrf_token %}
+</form>
+
+{% endblock %}
