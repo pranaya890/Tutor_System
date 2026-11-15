@@ -133,6 +133,209 @@
         </div>
     </div>
 
+
+    <!-- Overall Learning Performance -->
+    <div class="space-y-4">
+        <div>
+            <h3 class="text-lg font-bold text-gray-800">
+                Overall Learning Performance
+            </h3>
+            <p class="text-sm text-gray-500 mt-1">
+                Your progress based on completed quizzes since your latest performance resets.
+            </p>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+
+            <!-- Completed Attempts -->
+            <div class="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm">
+                <p class="text-sm text-gray-500 font-medium">
+                    Completed Attempts
+                </p>
+                <h3 class="text-3xl font-bold text-indigo-700 mt-2">
+                    {{ total_completed }}
+                </h3>
+            </div>
+
+            <!-- Total Marks -->
+            <div class="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm">
+                <p class="text-sm text-gray-500 font-medium">
+                    Total Marks
+                </p>
+                <h3 class="text-3xl font-bold text-emerald-600 mt-2">
+                    {{ total_score|floatformat:1 }} /
+                    {{ total_marks|floatformat:1 }}
+                </h3>
+            </div>
+
+            <!-- Overall Percentage -->
+            <div class="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm">
+                <p class="text-sm text-gray-500 font-medium">
+                    Overall Performance
+                </p>
+                <h3 class="text-3xl font-bold text-sky-600 mt-2">
+                    {{ overall_percentage }}%
+                </h3>
+
+                <div class="w-full bg-gray-100 rounded-full h-2 mt-4">
+                    <div class="bg-sky-500 h-2 rounded-full"
+                         style="width: {{ overall_percentage }}%">
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- Topic Performance Overview -->
+    <div class="space-y-4">
+
+        <div class="flex justify-between items-center flex-wrap gap-3">
+            <div>
+                <h3 class="text-lg font-bold text-gray-800">
+                    Topic Performance Overview
+                </h3>
+                <p class="text-sm text-gray-500 mt-1">
+                    Identify your strong topics and areas that need improvement.
+                </p>
+            </div>
+
+            <a href="{% url 'performance_analysis' %}"
+               class="text-sm font-semibold text-indigo-600 hover:text-indigo-800">
+                Full Performance Analysis →
+            </a>
+        </div>
+
+        <!-- Topic Summary Cards -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+
+            <div class="bg-white border border-green-200 rounded-2xl p-5 shadow-sm">
+                <p class="text-sm font-medium text-gray-500">
+                    Strong Topics
+                </p>
+                <h3 class="text-3xl font-bold text-green-600 mt-2">
+                    {{ strong_topics|length }}
+                </h3>
+                <p class="text-xs text-gray-500 mt-1">
+                    Performance of 70% or above
+                </p>
+            </div>
+
+            <div class="bg-white border border-red-200 rounded-2xl p-5 shadow-sm">
+                <p class="text-sm font-medium text-gray-500">
+                    Topics Needing Practice
+                </p>
+                <h3 class="text-3xl font-bold text-red-600 mt-2">
+                    {{ weak_topics|length }}
+                </h3>
+                <p class="text-xs text-gray-500 mt-1">
+                    Performance below 50%
+                </p>
+            </div>
+
+            <div class="bg-white border border-yellow-200 rounded-2xl p-5 shadow-sm">
+                <p class="text-sm font-medium text-gray-500">
+                    Developing Topics
+                </p>
+                <h3 class="text-3xl font-bold text-yellow-600 mt-2">
+                    {{ developing_topics|length }}
+                </h3>
+                <p class="text-xs text-gray-500 mt-1">
+                    Performance from 50% to below 70%
+                </p>
+            </div>
+
+        </div>
+
+        <!-- Detailed Topic Performance -->
+        {% if topic_performance %}
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+
+                {% for topic in topic_performance %}
+
+                    <div class="bg-white border border-gray-200 rounded-2xl p-6 shadow-sm space-y-4">
+
+                        <div class="flex justify-between items-start gap-3">
+                            <div>
+                                <p class="text-xs text-indigo-600 font-semibold uppercase">
+                                    {{ topic.document_title }}
+                                </p>
+                                <h4 class="font-bold text-gray-800 mt-1">
+                                    {{ topic.topic }}
+                                </h4>
+                                <p class="text-xs text-gray-500 mt-1">
+                                    {{ topic.attempt_count }} completed attempt(s)
+                                </p>
+                            </div>
+
+                            {% if topic.category == "Strong" %}
+                                <span class="px-3 py-1 rounded-full text-xs font-semibold bg-green-100 text-green-700">
+                                    Strong
+                                </span>
+                            {% elif topic.category == "Needs Practice" %}
+                                <span class="px-3 py-1 rounded-full text-xs font-semibold bg-red-100 text-red-700">
+                                    Needs Practice
+                                </span>
+                            {% else %}
+                                <span class="px-3 py-1 rounded-full text-xs font-semibold bg-yellow-100 text-yellow-700">
+                                    Developing
+                                </span>
+                            {% endif %}
+                        </div>
+
+                        <div>
+                            <div class="flex justify-between text-sm mb-2">
+                                <span class="text-gray-500">
+                                    Topic Score
+                                </span>
+                                <span class="font-bold text-gray-800">
+                                    {{ topic.percentage }}%
+                                </span>
+                            </div>
+
+                            <div class="w-full bg-gray-100 rounded-full h-2">
+                                <div class="bg-indigo-600 h-2 rounded-full"
+                                     style="width: {{ topic.percentage }}%">
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="bg-indigo-50 rounded-xl p-4">
+                            <p class="text-xs font-semibold text-indigo-700">
+                                <i class="fa-solid fa-brain mr-1"></i>
+                                Adaptive Difficulty Recommendation
+                            </p>
+
+                            <p class="text-sm font-bold text-indigo-900 mt-2 capitalize">
+                                {{ topic.recommended_difficulty }} Difficulty
+                            </p>
+                        </div>
+
+                    </div>
+
+                {% endfor %}
+
+            </div>
+
+        {% else %}
+
+            <div class="bg-white border border-gray-200 rounded-2xl p-8 text-center">
+                <i class="fa-solid fa-chart-line text-3xl text-indigo-400"></i>
+                <h4 class="font-bold text-gray-800 mt-3">
+                    No Topic Performance Available
+                </h4>
+                <p class="text-sm text-gray-500 mt-2">
+                    Complete a quiz to see your topic-wise learning progress and adaptive difficulty recommendations.
+                </p>
+            </div>
+
+        {% endif %}
+
+    </div>
+
+
+
     <!-- Personalized Learning Recommendations -->
     <div class="space-y-4">
 
@@ -162,14 +365,22 @@
 
                         <!-- Topic and Priority -->
                         <div class="flex items-start justify-between gap-3">
-                            <div>
+                            <div class="min-w-0">
+                                <p class="text-xs font-semibold text-indigo-600 uppercase tracking-wide mb-1">
+                                    <i class="fa-solid fa-file-pdf mr-1"></i>
+                                    {{ recommendation.document_title }}
+                                </p>
+
                                 <h4 class="font-bold text-gray-800">
                                     {{ recommendation.topic }}
                                 </h4>
+
                                 <p class="text-xs text-gray-500 mt-1">
                                     {{ recommendation.attempt_count }} completed attempt(s)
                                 </p>
+
                             </div>
+
 
                             {% if recommendation.priority == "High" %}
                                 <span class="px-3 py-1 rounded-full text-xs font-semibold bg-red-100 text-red-700 whitespace-nowrap">

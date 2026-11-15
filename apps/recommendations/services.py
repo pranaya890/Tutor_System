@@ -1,95 +1,25 @@
-from django.db.models import Count, Sum, F, Q, OuterRef, Subquery
 
-from apps.quiz.models import Quiz,QuizAttempt
+from django.db.models import (
+    Count,
+    Sum,
+    F,
+    Q,
+    OuterRef,
+    Subquery,
+)
 
+from apps.quiz.models import Quiz, QuizAttempt
 from apps.recommendations.models import PerformanceReset
-
-def generate_personalized_recommendations(student):
-    """
-    Generate topic-wise study recommendations
-    based on a student's completed quiz attempts.
-    """
-
-    completed_attempts = QuizAttempt.objects.filter(
-        student=student,
-        status="completed",
-    )
-
-    topic_stats = completed_attempts.values(
-        "quiz__topic"
-    ).annotate(
-        attempt_count=Count("id"),
-        total_score=Sum("score"),
-        total_marks=Sum("total_marks"),
-    ).order_by("quiz__topic")
-
-    recommendations = []
-
-    for item in topic_stats:
-        topic = item["quiz__topic"]
-        score = item["total_score"] or 0
-        marks = item["total_marks"] or 0
-
-        if marks <= 0:
-            continue
-
-        percentage = (score / marks) * 100
-
-        if percentage < 50:
-            category = "Needs Practice"
-            priority = "High"
-            message = (
-                f"You need more practice in {topic}. "
-                "Revise the fundamental concepts and review "
-                "the questions you answered incorrectly."
-            )
-            suggestion = "Revise the topic and attempt another practice quiz."
-
-        elif percentage < 70:
-            category = "Developing"
-            priority = "Medium"
-            message = (
-                f"You are making progress in {topic}. "
-                "Review difficult concepts to improve your understanding."
-            )
-            suggestion = "Review your previous answers and practise again."
-
-        else:
-            category = "Strong"
-            priority = "Low"
-            message = (
-                f"You are performing well in {topic}. "
-                "Continue learning beyond the basic concepts."
-            )
-            suggestion = "Try a more challenging quiz or advanced concepts."
-
-        recommendations.append({
-            "topic": topic,
-            "attempt_count": item["attempt_count"],
-            "percentage": round(percentage, 2),
-            "category": category,
-            "priority": priority,
-            "message": message,
-            "suggestion": suggestion,
-        })
-
-    priority_order = {
-        "High": 1,
-        "Medium": 2,
-        "Low": 3,
-    }
-
-    recommendations.sort(
-        key=lambda item: priority_order[item["priority"]]
-    )
-
-    return recommendations
+from apps.documents.models import Document
 
 
 def get_topic_performance(student, document_id, topic="all"):
     """
-    Calculate performance using only completed attempts
-    after the latest applicable performance reset.
+    Calculate performance for a selected PDF and topic.
+
+    All-topic resets apply to every topic.
+    Topic-specific resets apply only to that topic.
+    Previous attempts remain preserved in the database.
     """
 
     topic = topic.strip()
@@ -101,13 +31,11 @@ def get_topic_performance(student, document_id, topic="all"):
         quiz__document_id=document_id,
     )
 
-    # Filter attempts for a specific topic when selected.
     if not is_all_topics:
         attempts = attempts.filter(
             quiz__topic__iexact=topic
         )
 
-    # Find the latest applicable reset for each attempt.
     reset_events = PerformanceReset.objects.filter(
         student=student,
         document_id=document_id,
@@ -115,13 +43,13 @@ def get_topic_performance(student, document_id, topic="all"):
 
     if is_all_topics:
         reset_events = reset_events.filter(
-            Q(topic="all") |
-            Q(topic=OuterRef("quiz__topic"))
+            Q(topic__iexact="all")
+            | Q(topic__iexact=OuterRef("quiz__topic"))
         )
     else:
         reset_events = reset_events.filter(
-            Q(topic="all") |
-            Q(topic__iexact=topic)
+            Q(topic__iexact="all")
+            | Q(topic__iexact=topic)
         )
 
     attempts = attempts.annotate(
@@ -129,8 +57,8 @@ def get_topic_performance(student, document_id, topic="all"):
             reset_events.order_by("-reset_at").values("reset_at")[:1]
         )
     ).filter(
-        Q(reset_cutoff__isnull=True) |
-        Q(completed_at__gt=F("reset_cutoff"))
+        Q(reset_cutoff__isnull=True)
+        | Q(completed_at__gt=F("reset_cutoff"))
     )
 
     stats = attempts.aggregate(
@@ -143,7 +71,9 @@ def get_topic_performance(student, document_id, topic="all"):
     total_score = stats["total_score"] or 0
     total_marks = stats["total_marks"] or 0
 
-    selected_topic = "All Topics" if is_all_topics else topic
+    selected_topic = (
+        "All Topics" if is_all_topics else topic
+    )
 
     if attempt_count == 0 or total_marks <= 0:
         return {
@@ -182,6 +112,127 @@ def get_topic_performance(student, document_id, topic="all"):
             f"{difficulty} difficulty is recommended."
         ),
     }
+
+
+def generate_personalized_recommendations(student):
+    """
+    Generate document-wise and topic-wise recommendations.
+
+    Only completed attempts after the latest applicable reset
+    are considered.
+    """
+
+    topic_groups = (
+        QuizAttempt.objects.filter(
+            student=student,
+            status="completed",
+        )
+        .values(
+            "quiz__document_id",
+            "quiz__topic",
+        )
+        .distinct()
+        .order_by(
+            "quiz__document_id",
+            "quiz__topic",
+        )
+    )
+
+    # Fetch document titles efficiently.
+    document_ids = {
+        group["quiz__document_id"]
+        for group in topic_groups
+    }
+
+    documents = Document.objects.in_bulk(document_ids)
+
+    recommendations = []
+
+    for group in topic_groups:
+        document_id = group["quiz__document_id"]
+        topic = group["quiz__topic"]
+
+        document = documents.get(document_id)
+
+        performance = get_topic_performance(
+            student=student,
+            document_id=document_id,
+            topic=topic,
+        )
+
+        if performance["percentage"] is None:
+            continue
+
+        percentage = performance["percentage"]
+
+        if percentage < 50:
+            category = "Needs Practice"
+            priority = "High"
+
+            message = (
+                f"You need more practice in {topic}. "
+                "Revise the fundamental concepts and review "
+                "the questions you answered incorrectly."
+            )
+
+            suggestion = (
+                "Revise the topic and attempt another practice quiz."
+            )
+
+        elif percentage < 70:
+            category = "Developing"
+            priority = "Medium"
+
+            message = (
+                f"You are making progress in {topic}. "
+                "Review difficult concepts to improve your understanding."
+            )
+
+            suggestion = (
+                "Review your previous answers and practise again."
+            )
+
+        else:
+            category = "Strong"
+            priority = "Low"
+
+            message = (
+                f"You are performing well in {topic}. "
+                "Continue learning beyond the basic concepts."
+            )
+
+            suggestion = (
+                "Try a more challenging quiz or advanced concepts."
+            )
+
+        recommendations.append({
+            "document_id": document_id,
+            "document_title": (
+                document.title if document else "Unknown Document"
+            ),
+            "topic": topic,
+            "attempt_count": performance["attempt_count"],
+            "percentage": percentage,
+            "category": category,
+            "priority": priority,
+            "message": message,
+            "suggestion": suggestion,
+        })
+
+    priority_order = {
+        "High": 1,
+        "Medium": 2,
+        "Low": 3,
+    }
+
+    recommendations.sort(
+        key=lambda item: (
+            priority_order[item["priority"]],
+            item["percentage"],
+        )
+    )
+
+    return recommendations
 
 
 def get_document_topics(student, document_id):

@@ -5,7 +5,7 @@ from django.views import View
 from django.db.models import Sum, Count
 from django.utils.decorators import method_decorator
 from apps.quiz.models import Quiz, QuizAttempt,StudentAnswer
-from apps.recommendations.services import generate_personalized_recommendations
+from apps.recommendations.services import (generate_personalized_recommendations,get_topic_performance)
 from .models import TutorSession, ChatMessage
 from apps.documents.models import Document
 from apps.documents.rag import generate_rag_answer
@@ -15,6 +15,7 @@ from apps.documents.rag import generate_rag_answer
 class DashboardView(View):
     def get(self, request):
 
+        # Basic dashboard statistics
         total_docs = Document.objects.filter(
             owner=request.user
         ).count()
@@ -27,8 +28,98 @@ class DashboardView(View):
             created_by=request.user
         ).count()
 
+        # Personalized recommendations
         recommendations = generate_personalized_recommendations(
             request.user
+        )
+
+        # Find topics with completed quiz attempts
+        topic_groups = QuizAttempt.objects.filter(
+            student=request.user,
+            status="completed",
+            quiz__created_by=request.user,
+            quiz__document__owner=request.user,
+        ).values(
+            "quiz__document_id",
+            "quiz__document__title",
+            "quiz__topic",
+        ).distinct().order_by(
+            "quiz__document__title",
+            "quiz__topic",
+        )
+
+        topic_performance = []
+
+        total_score = 0
+        total_marks = 0
+        total_completed = 0
+
+        # Calculate reset-aware performance for every topic
+        for item in topic_groups:
+
+            performance = get_topic_performance(
+                student=request.user,
+                document_id=item["quiz__document_id"],
+                topic=item["quiz__topic"],
+            )
+
+            # Ignore topics without performance after their latest reset
+            if performance["percentage"] is None:
+                continue
+
+            percentage = performance["percentage"]
+
+            if percentage >= 70:
+                category = "Strong"
+            elif percentage < 50:
+                category = "Needs Practice"
+            else:
+                category = "Developing"
+
+            topic_data = {
+                "document_title": item["quiz__document__title"],
+                "topic": item["quiz__topic"],
+                "attempt_count": performance["attempt_count"],
+                "total_score": performance["total_score"],
+                "total_marks": performance["total_marks"],
+                "percentage": percentage,
+                "category": category,
+                "recommended_difficulty": (
+                    performance["recommended_difficulty"]
+                ),
+            }
+
+            topic_performance.append(topic_data)
+
+            total_score += performance["total_score"]
+            total_marks += performance["total_marks"]
+            total_completed += performance["attempt_count"]
+
+        # Overall learning performance
+        overall_percentage = (
+            (total_score / total_marks) * 100
+            if total_marks > 0 else 0
+        )
+
+        # Separate strong, weak, and developing topics
+        strong_topics = [
+            topic for topic in topic_performance
+            if topic["category"] == "Strong"
+        ]
+
+        weak_topics = [
+            topic for topic in topic_performance
+            if topic["category"] == "Needs Practice"
+        ]
+
+        developing_topics = [
+            topic for topic in topic_performance
+            if topic["category"] == "Developing"
+        ]
+
+        # Show topics needing attention first
+        topic_performance.sort(
+            key=lambda item: item["percentage"]
         )
 
         context = {
@@ -36,6 +127,19 @@ class DashboardView(View):
             "total_quizzes": total_quizzes,
             "chat_sessions": chat_sessions,
             "recommendations": recommendations,
+
+            # Overall performance
+            "total_completed": total_completed,
+            "total_score": total_score,
+            "total_marks": total_marks,
+            "overall_percentage": round(overall_percentage, 2),
+
+            # Topic performance
+            "topic_performance": topic_performance,
+            "total_topics": len(topic_performance),
+            "strong_topics": strong_topics,
+            "weak_topics": weak_topics,
+            "developing_topics": developing_topics,
         }
 
         return render(
@@ -43,7 +147,6 @@ class DashboardView(View):
             "tutor/dashboard.html",
             context
         )
-
 
 @method_decorator(login_required, name="dispatch")
 class TutorChatView(View):
@@ -397,40 +500,41 @@ class QuizHistoryView(View):
         )
 
 
-
 @method_decorator(login_required, name="dispatch")
 class PerformanceAnalysisView(View):
-
     def get(self, request):
-
-        # Only analyze completed attempts belonging to this student.
         completed_attempts = QuizAttempt.objects.filter(
             student=request.user,
             status="completed",
+            quiz__document__owner=request.user,
         )
 
-        # Group attempts by quiz topic.
-        topic_stats = completed_attempts.values(
-            "quiz__topic"
-        ).annotate(
-            attempt_count=Count("id"),
-            total_score=Sum("score"),
-            total_marks=Sum("total_marks"),
-        ).order_by("quiz__topic")
+        topic_groups = completed_attempts.values(
+            "quiz__document_id",
+            "quiz__document__title",
+            "quiz__topic",
+        ).distinct()
 
-        # Calculate topic percentages and performance categories.
         topics = []
 
-        for item in topic_stats:
+        total_score = 0
+        total_marks = 0
+        total_completed = 0
 
-            score = item["total_score"] or 0
-            marks = item["total_marks"] or 0
-
-            percentage = (
-                (score / marks) * 100
-                if marks > 0
-                else 0
+        for item in topic_groups:
+            performance = get_topic_performance(
+                student=request.user,
+                document_id=item["quiz__document_id"],
+                topic=item["quiz__topic"],
             )
+
+            # Ignore topics with no attempts after their latest reset.
+            if performance["percentage"] is None:
+                continue
+
+            score = performance["total_score"]
+            marks = performance["total_marks"]
+            percentage = performance["percentage"]
 
             if percentage >= 70:
                 category = "Strong"
@@ -440,32 +544,28 @@ class PerformanceAnalysisView(View):
                 category = "Developing"
 
             topics.append({
+                "document_id": item["quiz__document_id"],
+                "document_title": item["quiz__document__title"],
                 "topic": item["quiz__topic"],
-                "attempt_count": item["attempt_count"],
+                "attempt_count": performance["attempt_count"],
                 "total_score": score,
                 "total_marks": marks,
-                "percentage": round(percentage, 2),
+                "percentage": percentage,
                 "category": category,
             })
 
-        # Overall performance.
-        total_score = completed_attempts.aggregate(
-            total=Sum("score")
-        )["total"] or 0
-
-        total_marks = completed_attempts.aggregate(
-            total=Sum("total_marks")
-        )["total"] or 0
+            total_score += score
+            total_marks += marks
+            total_completed += performance["attempt_count"]
 
         overall_percentage = (
             (total_score / total_marks) * 100
-            if total_marks > 0
-            else 0
+            if total_marks > 0 else 0
         )
 
         context = {
             "topics": topics,
-            "total_completed": completed_attempts.count(),
+            "total_completed": total_completed,
             "total_topics": len(topics),
             "overall_percentage": round(overall_percentage, 2),
             "total_score": total_score,

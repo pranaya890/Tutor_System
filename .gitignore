@@ -24,3 +24,5 @@ staticfiles/
 Thumbs.db
 
 git-practice/
+# ChromaDB local vector database
+vector_store/chroma/
